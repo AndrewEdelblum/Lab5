@@ -1,0 +1,103 @@
+---
+title: "Lab 5"
+author: "Andrew Edelblum"
+date: "2/13/2019"
+output: html_document
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE)
+
+library(rio)
+library(janitor)
+library(ggplot2)
+library(tidyverse)
+theme_set(theme_minimal())
+
+states <- import("./states_all.csv", setclass = "tibble") %>% 
+  clean_names()
+```
+
+# 1. In a new code chunk, reproduce the plot.
+
+Can do. But we'll have to do some data tidying before we get there! To do this, we'll simply `gather` the three different types of revenue and split them into two columns: one for the revenue type, i.e., federal, local, state, and one for the revenue itself.
+
+```{r tidy}
+states_t <- states %>% 
+  gather("type", "revenue", federal_revenue:local_revenue) %>% 
+  mutate(state = stringr::str_to_title(state)) %>% 
+  mutate(state = stringr::str_replace_all(state, "_", " "))
+```
+
+Here is the plot in all its cognitive-load-intensive glory!
+
+```{r reproduce, fig.height = 5, fig.width = 15}
+ggplot(states_t, aes(x = year, y = revenue, color = state)) +
+  geom_line() +
+  facet_wrap(~type)
+```
+
+# 2. Briefly explain, outside the code chunk, a few things that could be done to improve the plot, and why.
+
+As I alluded to above, the data-to-ink ratio of this plot is pretty poor, and the cognitive load is *immense*! 
+
+In particular over half the "canvas space," so to speak, is taken up by the many, many labels used to differentiate each state *and* U.S. territory. (Territories, like Guam and the Northern Mariana Islands, have their own revenue growth lines.) Since the original intent behind the plot was to communicate differences in *states*, it is distracting to have additional non-state data in the visualization.
+
+This, of course, doesn't even touch the issue of making sense of and drawing meaningful inferences from the plot itself. With only a *slightly* different color used to demarcate each state, it is near impossible to detect the local annual revenue growth for Oregon versus, say, New Jersey. 
+
+If I had to put these issues into a few summarizing points, they would be that:
+
+1) There are way too many colors. (One for each state is **a lot**!)
+2) Many of the states occupying space in the plot aren't even states at all.
+3) The actual real estate taken up by the plot component of the visualization are squeezed tight because of just how many labels there are.
+
+Now with all that out of the way, it's time to... take a sad plot and make it better. 
+
+# 3. In a new code chunk, make at least three revisions to the plot that you suggested above.
+
+To take care of the "too many labels" issue, we're going to color by a more aggregated unit than state, to simplify the plot and thereby communicate better information. Coloring by state gives us at the *very least* a total of 50 individual colors. This is as difficult to look at as it is to interpret. So, drawing inspiration from the previous lab assignment, we will group states by region of the U.S. to which they belong. 
+
+We will thus import the **region** data and `left_join` it to **states_all**. Altogether, this would give us a trend line over time for each state — and colored by region. But perhaps we want to project the overall trend in revenue growth for each region. That could be a quick and intuitive bit of information to communicate.
+
+As such, we will `group_by` region, year, and revenue type to calculate the average revenue by region, year, and revenue type. This overall trend line will be superimposed upon each state's individual trend line. 
+
+```{r region}
+region <- import("./region.csv", setclass = "tibble") %>% 
+  clean_names()
+
+states_region <- left_join(region, states_t) %>% 
+  drop_na(type) %>% 
+  group_by(region, year, type) %>% 
+  mutate(avg_rev = mean(revenue))
+
+states_region$type <- factor(states_region$type, labels = c("Federal", "Local", "State"))
+```
+
+And *voila*! Here's what we got.
+
+As far as specific revisions, I will list them out here:
+
+1) I colored trend lines by region, as opposed to by state. (Now, there are only four colors represented in the legend vs. the 50+ in the original plot.)
+2) These colors are sensitive to color blindness, as they come from the Okabe Ito palette.
+3) I added a bolded overall trend line for each revenue type for each region.
+4) I applied a log10 transformation on the *y*-axis to mitigate some data clumping at the low end of revenue.
+5) I made the axis and facet labels neat. I also added a title, subtitle, and caption.
+
+```{r revisions, fig.width = 10}
+library(colorblindr)
+
+ggplot(states_region, aes(x = year, y = revenue, group = state, color = region)) +
+  geom_line(alpha = .6) +
+  geom_line(aes(x = year, y = avg_rev, color = region), size = 1.5) +
+  facet_wrap(~type, nrow = 1) +
+  scale_color_OkabeIto(name = "Region",
+                       breaks = c("South", "Midwest", "West", "Northeast"),
+                       labels = c("South", "Midwest", "West", "Northeast")) +
+  scale_x_continuous(limits = c(1992, 2016), breaks = c(1992, 2000, 2008, 2016)) +
+  scale_y_log10(labels = scales::dollar) +
+  labs(x = "Year", y = "Revenue", title = "Average federal, local, and state revenue growth by state colored by region", subtitle = "Data from 1992 - 2017", caption = "Applied log10 transformation to revenue") +
+  theme(plot.title = element_text(size = 16, face = "bold", hjust = 0.5), 
+        plot.subtitle = element_text(hjust = 0.5),
+        legend.title = element_text(size = 16, face = "bold"),
+        legend.background = element_rect(size = .5))
+```
